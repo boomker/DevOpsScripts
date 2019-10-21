@@ -8,19 +8,27 @@ User:               Guodong
 Create Date:        2017/7/4
 Create Time:        16:32
 Description:        backup mysql server data using mysqldump on Windows server
-
+Updates:            Improve code to optimize experience
  """
 
+# Although using Python to backup mysql database is not a pythonic way because of
+# using the system command mysqldump and xtrabackup is inevitable,
+# but we need backup on Windows sometimes.
+
 import os
+import sys
+import time
 from subprocess import call
 
 mysql_host = '127.0.0.1'
-mysql_port = 0
+mysql_port = 3306
 mysql_user = 'root'
-mysql_password = ''
-mysql_db_list = ['mysql', 'devdb', 'itoms_schema']  # dbs to backup
+mysql_password = 'Y0dPCxyLPFpbw'
+mysql_db_list = ['cmdb', 'kissops', 'devdb', 'itoms_schema']  # dbs to backup
 
-enable_interactive_mode = False  # same concept as 'bash -i'
+backups_save_path = os.path.join(os.path.expanduser('~'), 'Desktop')
+
+enable_interactive_mode = False
 print_cli = False  # if print mysqldump cli, so that admin user can refer it
 
 
@@ -71,7 +79,7 @@ def mysql_auth():
         password: {password}
     '''.format(host=mysql_host, port=mysql_port, user=mysql_user, password=mysql_password)
     if confirm('Is this right?'):
-        pass
+        print("default setting is accepted!")
     else:
         import getpass
         mysql_host = raw_input('Enter MySQL host:')
@@ -93,21 +101,46 @@ def backup():
 --routines --events --triggers --single-transaction \
 --databases'.format(user=mysql_user, password=mysql_password, host=mysql_host, port=mysql_port)
 
-    HOME = os.path.expanduser('~')  # both Windows and Linux is works
-    backup_base_dir = os.path.join(HOME, 'Desktop')
+    try:
+        with open(os.devnull, 'w') as null:
+            call("%s --help" % mysqldump_bin_file, stdout=null)  # run command without output
+    except WindowsError as e:
+        if e.args[0] == 2:
+            print "%s: command not found" % mysqldump_bin_file
+        else:
+            print "some wrong with %s" % mysqldump_bin_file
+        sys.exit(e.args[0])
 
+    if os.path.exists(backups_save_path):
+        backup_base_dir = backups_save_path
+    else:
+        print("The backups will be stored into %s" % backups_save_path)
+        if confirm("The directory where the backup is stored does not exist, are you wish to create it?"):
+            os.makedirs(backups_save_path)
+            backup_base_dir = backups_save_path
+        else:
+            HOME = os.path.expanduser('~')  # both Windows and Linux is works
+            backup_base_dir = os.path.join(HOME, 'Desktop')
+            print("The backups will be stored into %s" % backup_base_dir)
+            if not confirm("Accept it?"):
+                print("Aborted!")
+                sys.exit(2)
     for db in mysql_db_list:
-        backup_file = os.path.join(backup_base_dir, '{db}.sql'.format(db=db))
+        backup_file = os.path.join(backup_base_dir, '{db}_{time}.sql'.format(db=db, time=time.strftime("%Y%m%d%H%M%S")))
         if print_cli:
-            print "{mysqldump} {options} {database} > {path}".format(mysqldump=mysqldump_bin_file,
-                                                                     options=mysqldump_parameters,
-                                                                     database=db, path=backup_file)
+            print "{mysqldump} {options} {database} > {path} 2>nul".format(mysqldump=mysqldump_bin_file,
+                                                                           options=mysqldump_parameters,
+                                                                           database=db, path=backup_file)
         print "mysqldump database %s ..." % db
         # Suppress error messages in Windows commandline
-        call("{mysqldump} {options} {database} > {path} 2> nul".format(mysqldump=mysqldump_bin_file,
-                                                                       options=mysqldump_parameters,
-                                                                       database=db, path=backup_file), shell=True)
-        print 'finished'
+        return_code = call("{mysqldump} {options} {database} > {path} 2> nul".format(mysqldump=mysqldump_bin_file,
+                                                                                     options=mysqldump_parameters,
+                                                                                     database=db, path=backup_file),
+                           shell=True)
+        if return_code != 0:
+            print('%s database backup finished with exit code %d' % (db, return_code))
+        else:
+            print('%s database backup successfully!' % db)
 
 
 if __name__ == '__main__':
